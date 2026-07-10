@@ -127,7 +127,7 @@ jobs:
       # đây chạy TRƯỚC push để có thể chặn hẳn image có lỗ hổng CRITICAL/HIGH chưa có bản vá,
       # không để lọt lên registry (xem devops-handbook/09-security.md, 07-cicd.md).
       - name: Scan image bằng Trivy (fail build nếu có CVE CRITICAL/HIGH chưa có bản vá)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.sha_short }}
