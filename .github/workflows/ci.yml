@@ -55,7 +55,14 @@ jobs:
             NEXT_PUBLIC_SANITY_DATASET=placeholder
             NEXT_PUBLIC_SANITY_API_VERSION=2025-03-20
             NEXT_PUBLIC_BASE_URL=https://placeholder.invalid
-            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_placeholder
+            # Clerk SDK tự VALIDATE cấu trúc publishable key (không chỉ kiểm tra có mặt hay không)
+            # — chuỗi "pk_test_placeholder" không đúng định dạng thật (base64 của
+            # "<frontend-api-host>$") nên bị Clerk throw "invalid publishableKey" ngay lúc
+            # prerender trang có <ClerkProvider>, làm build-only fail dù code không có lỗi gì.
+            # Publishable key CÔNG KHAI theo thiết kế (an toàn lộ ra client-side) — dùng thẳng giá
+            # trị Clerk test thật ở đây, không phải secret nên không vi phạm nguyên tắc "PR không
+            # chạm gì nhạy cảm".
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_Y29tcGxldGUtcmF2ZW4tNjEuY2xlcmsuYWNjb3VudHMuZGV2JA
 
   # ---------------------------------------------------------------------------------------------
   # Job build-scan-push: CHỈ chạy khi push vào main (đúng scope IAM trust policy) — build image
@@ -127,7 +134,7 @@ jobs:
       # đây chạy TRƯỚC push để có thể chặn hẳn image có lỗ hổng CRITICAL/HIGH chưa có bản vá,
       # không để lọt lên registry (xem devops-handbook/09-security.md, 07-cicd.md).
       - name: Scan image bằng Trivy (fail build nếu có CVE CRITICAL/HIGH chưa có bản vá)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.sha_short }}
