@@ -1,12 +1,22 @@
 # CI — build + scan (Trivy) + push image `shopcartyt` lên ECR qua GitHub OIDC (không dùng access
 # key AWS dài hạn — xem infra/github-oidc-ecr.tf + devops-handbook/09-security.md "OIDC
-# federation"). Workflow này CHỈ build/push image, KHÔNG deploy (không kubectl apply/update ArgoCD
-# Application) — deploy là việc của Phase 7 (Ingress), phụ thuộc image đã có trong ECR trước.
+# federation"). Từ Phase 7: sau khi push ECR thành công, workflow TỰ commit tag mới vào
+# k8s/deployment.yaml — ArgoCD (Application "shopcartyt", Git source trỏ path k8s/) tự sync, tạo
+# thành CD hoàn chỉnh (push code -> tự deploy). KHÔNG kubectl apply trực tiếp ở đây — GitOps nghĩa
+# là workflow chỉ commit vào Git, ArgoCD là bên duy nhất thật sự chạm cluster.
 name: CI - Build & Push shopcartyt
 
 on:
   push:
     branches: [main]
+    # QUAN TRỌNG: tránh vòng lặp vô hạn — bước "Cập nhật tag trong k8s/deployment.yaml" bên dưới tự
+    # commit + push vào chính nhánh main, nếu không loại trừ path này thì commit đó lại tự trigger
+    # y hệt workflow này, build lại đúng image (lãng phí) rồi lại cố commit tag (không đổi gì vì
+    # tag đã đúng, nhưng vẫn tốn 1 lần build/scan/push vô ích) — có nguy cơ chạy mãi nếu commit
+    # message tự tạo bị hiểu là "có thay đổi" theo cách khác. `paths-ignore` chặn hẳn từ gốc: commit
+    # chỉ sửa file trong k8s/ không bao giờ trigger lại workflow này.
+    paths-ignore:
+      - "k8s/**"
   # Build-only cho PR để bắt lỗi build/Dockerfile sớm TRƯỚC khi merge — nhưng KHÔNG login AWS/push
   # ECR ở đây. Lý do: IAM Role trust policy (infra/github-oidc-ecr.tf, aws_iam_role.github_actions_ci)
   # chỉ chấp nhận OIDC token có claim `sub = repo:blvinh20/shopcartyt:ref:refs/heads/main` — token
@@ -76,7 +86,10 @@ jobs:
       # để AWS STS xác minh và đổi lấy credential tạm thời (AssumeRoleWithWebIdentity), không cần
       # access key/secret key lưu trong GitHub Secrets.
       id-token: write
-      contents: read
+      # contents: write (không phải read) — job cần tự commit + push cập nhật tag trong
+      # k8s/deployment.yaml (bước "Cập nhật tag" ở cuối) bằng chính GITHUB_TOKEN mặc định, không
+      # cần tạo PAT/deploy key riêng.
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -158,3 +171,21 @@ jobs:
       - name: In ra tag đã push (tiện tra cứu log)
         run: |
           echo "Đã push: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.sha_short }}"
+
+      # CD: tự cập nhật tag image trong k8s/deployment.yaml rồi commit + push — ArgoCD (Application
+      # "shopcartyt", Git source path k8s/, syncPolicy.automated) tự phát hiện commit mới và sync,
+      # không cần workflow này tự kubectl apply gì cả (đúng model GitOps pull-based, xem
+      # devops-handbook/07-cicd.md Q1 "vì sao pull an toàn hơn push" — bản chất giống lý do ArgoCD
+      # được chọn thay vì CI tự push thẳng vào cluster).
+      - name: Cập nhật tag image trong k8s/deployment.yaml (trigger ArgoCD sync)
+        run: |
+          sed -i -E "s#(ecommerce-lab-shopcartyt:)[A-Za-z0-9._-]+#\1${{ steps.vars.outputs.sha_short }}#" k8s/deployment.yaml
+          if git diff --quiet k8s/deployment.yaml; then
+            echo "Tag không đổi (đã build lại đúng commit hiện tại) — bỏ qua commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/deployment.yaml
+          git commit -m "ci: deploy image ${{ steps.vars.outputs.sha_short }} [skip ci]"
+          git push origin HEAD:main
