@@ -1,0 +1,13 @@
+# CVE-2026-48815 (sigstore certificateOIDs verification) — sigstore@3.0.0 nằm ở
+# node_modules/npm/node_modules/sigstore: đây là bản sigstore npm CLI TỰ VENDOR/BUNDLE bên trong
+# chính package "npm" (kéo vào transitively qua sanity -> @oclif/plugin-plugins -> npm), KHÔNG
+# phải dependency resolve bình thường qua registry — `overrides` trong package.json (kể cả cú pháp
+# lồng "npm": {"sigstore": "..."}) không với tới được, đã verify thật bằng npm install lặp lại,
+# version vẫn giữ nguyên 3.0.0 sau override.
+#
+# Rủi ro thật: CVE này liên quan tới xác minh certificateOIDs lúc npm CLI verify package signature
+# (dùng cho `npm audit signatures`/publish flow) — hoàn toàn không liên quan tới runtime của app
+# Next.js đang chạy trong container (không ai gọi `npm publish`/`npm audit signatures` bên trong
+# pod production). Chấp nhận rủi ro này có ghi chú rõ ràng, thay vì tắt cả Trivy gate hay cố ép
+# override không hiệu quả.
+CVE-2026-48815

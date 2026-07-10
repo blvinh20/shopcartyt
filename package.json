@@ -31,7 +31,7 @@
     "embla-carousel-react": "^8.5.2",
     "lucide-react": "^0.477.0",
     "motion": "^12.6.0",
-    "next": "15.2.1",
+    "next": "15.5.20",
     "next-sanity": "^9.9.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -44,6 +44,10 @@
     "tailwindcss-animate": "^1.0.7",
     "zustand": "^5.0.3"
   },
+  "overrides": {
+    "picomatch": "^4.0.4",
+    "sigstore": "^4.1.1"
+  },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
@@ -51,7 +55,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.2.1",
+    "eslint-config-next": "15.5.20",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
