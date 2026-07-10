@@ -82,6 +82,16 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Xoá hẳn npm/npx CLI bundled sẵn trong base image `node:*-alpine` — CVE-2026-33671 (picomatch
+# 4.0.3, HIGH) và tương tự (sigstore cũ hơn) nằm trong CHÍNH node_modules nội bộ của npm CLI
+# (/usr/local/lib/node_modules/npm/...), không phải dependency của project nên override trong
+# package.json không bao giờ với tới được (đã verify thật: Trivy scan image vẫn báo lỗi dù
+# package-lock.json của project đã đúng version vá). Container này CHỈ chạy `node server.js`
+# (output: standalone của Next.js) — không bao giờ gọi npm/npx lúc runtime, nên xoá thẳng loại bỏ
+# HẲN class lỗi này (không phải chỉ suppress bằng .trivyignore) thay vì tìm cách vá 1 tool không
+# dùng tới.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 # Non-root user — không chạy app bằng root trong container (xem devops-handbook/09-security.md).
 # Alpine không có sẵn user `node` non-root theo UID cố định như image Debian, nên tự tạo group/user
 # riêng đúng theo pattern chính thức Next.js example (`nextjs:nodejs`, uid/gid 1001 tránh trùng uid
