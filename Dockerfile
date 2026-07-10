@@ -21,7 +21,15 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 # `npm ci` (không phải `npm install`): cài đúng version khoá trong package-lock.json, build
 # reproducible — bắt buộc cho CI/production, không để npm tự resolve lại version mới hơn.
-RUN npm ci
+#
+# `--legacy-peer-deps` BẮT BUỘC: package-lock.json thật của repo có xung đột peer dependency có
+# sẵn từ trước (cmdk@1.0.0 yêu cầu peer react@^18, project dùng react@19 — độ trễ hệ sinh thái
+# thường gặp khi 1 package con chưa cập nhật kịp major version React mới) — xác nhận thật bằng
+# log lỗi CI đầu tiên (ERESOLVE could not resolve), không phải đoán. `npm ci` mặc định strict-mode
+# từ chối cài khi có xung đột này; `--legacy-peer-deps` bỏ qua check peer dependency (giữ nguyên
+# hành vi npm v6 trở về trước) — đây là cách project gốc chắc chắn đã dùng lúc tạo package-lock.json
+# (nếu không, `npm install` thường cũng đã fail y hệt ngay từ lúc code thêm cmdk).
+RUN npm ci --legacy-peer-deps
 
 # ---------- Stage 2: builder — build Next.js ----------
 FROM node:${NODE_VERSION} AS builder
