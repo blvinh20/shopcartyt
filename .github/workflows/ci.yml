@@ -1,0 +1,159 @@
+# CI — build + scan (Trivy) + push image `shopcartyt` lên ECR qua GitHub OIDC (không dùng access
+# key AWS dài hạn — xem infra/github-oidc-ecr.tf + devops-handbook/09-security.md "OIDC
+# federation"). Workflow này CHỈ build/push image, KHÔNG deploy (không kubectl apply/update ArgoCD
+# Application) — deploy là việc của Phase 7 (Ingress), phụ thuộc image đã có trong ECR trước.
+name: CI - Build & Push shopcartyt
+
+on:
+  push:
+    branches: [main]
+  # Build-only cho PR để bắt lỗi build/Dockerfile sớm TRƯỚC khi merge — nhưng KHÔNG login AWS/push
+  # ECR ở đây. Lý do: IAM Role trust policy (infra/github-oidc-ecr.tf, aws_iam_role.github_actions_ci)
+  # chỉ chấp nhận OIDC token có claim `sub = repo:blvinh20/shopcartyt:ref:refs/heads/main` — token
+  # OIDC phát sinh từ event `pull_request` mang `sub` khác (dạng
+  # `repo:<owner>/<repo>:pull_request`, hoặc từ fork thì owner còn khác hẳn), nên bước
+  # `configure-aws-credentials` chắc chắn FAIL "not authorized to perform sts:AssumeRoleWithWebIdentity"
+  # nếu cố assume role trong job PR. Đây là thiết kế bảo mật cố ý (least-privilege theo
+  # repo+branch), không phải thiếu sót — không mở rộng trust policy cho PR chỉ để tiện CI.
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: ecommerce-lab-shopcartyt
+  # ARN role OIDC — không phải secret (ARN không cấp quyền gì nếu không kèm token OIDC hợp lệ từ
+  # đúng repo+branch), an toàn để hardcode thẳng trong workflow (xem infra/github-oidc-ecr.tf).
+  AWS_ROLE_ARN: arn:aws:iam::405163642902:role/ecommerce-lab-github-actions-ci
+
+jobs:
+  # ---------------------------------------------------------------------------------------------
+  # Job build-only: chạy cho CẢ push lẫn PR — build Docker image (không push) để bắt lỗi
+  # Dockerfile/build sớm. Không cần credentials AWS gì cho job này.
+  # ---------------------------------------------------------------------------------------------
+  build-only:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (không push — chỉ kiểm tra Dockerfile hợp lệ)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          # Build-arg dùng giá trị placeholder cho PR — mục đích chỉ để xác nhận `next build`
+          # chạy được trong Docker, không cần giá trị Sanity/Clerk thật (không có secret nào ở
+          # job này, đúng tinh thần "PR không được quyền chạm gì nhạy cảm").
+          build-args: |
+            NEXT_PUBLIC_SANITY_PROJECT_ID=placeholder
+            NEXT_PUBLIC_SANITY_DATASET=placeholder
+            NEXT_PUBLIC_SANITY_API_VERSION=2025-03-20
+            NEXT_PUBLIC_BASE_URL=https://placeholder.invalid
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_placeholder
+
+  # ---------------------------------------------------------------------------------------------
+  # Job build-scan-push: CHỈ chạy khi push vào main (đúng scope IAM trust policy) — build image
+  # thật với build-arg thật, quét CVE bằng Trivy, rồi push lên ECR nếu quét sạch.
+  # ---------------------------------------------------------------------------------------------
+  build-scan-push:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      # id-token: write BẮT BUỘC cho OIDC — cho phép job xin GitHub phát 1 JSON Web Token (JWT)
+      # để AWS STS xác minh và đổi lấy credential tạm thời (AssumeRoleWithWebIdentity), không cần
+      # access key/secret key lưu trong GitHub Secrets.
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set short SHA làm image tag
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials qua OIDC (không dùng access key)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-shopcartyt-ci-${{ github.run_id }}
+
+      - name: Login ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (load vào Docker daemon local, CHƯA push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          # CHỈ tag theo git SHA, KHÔNG tag `latest` — repo ECR đặt `image_tag_mutability =
+          # IMMUTABLE` (infra/github-oidc-ecr.tf) đúng để chống supply-chain (không ai đè lại tag
+          # đã deploy). Hệ quả: nếu push tag `latest` ở lần chạy đầu, lần chạy SAU push lại đúng
+          # tag `latest` sẽ bị AWS từ chối thẳng (`ImageTagAlreadyExistsException`) vì tag đó đã
+          # tồn tại — tag immutable không cho phép re-push cùng tên tag dù nội dung image khác.
+          # Vì vậy chỉ dùng SHA (luôn duy nhất mỗi commit) làm tag duy nhất; Phase 7 (Ingress/
+          # Deployment) sẽ trỏ đúng tag SHA cụ thể thay vì `latest` — cũng là practice tốt hơn cho
+          # GitOps (ArgoCD diff theo tag cố định, không silently đổi image khi ai đó push đè `latest`).
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.sha_short }}
+          # Build-arg thật — giá trị NEXT_PUBLIC_SANITY_PROJECT_ID/DATASET và
+          # NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY lấy từ GitHub Actions "Variables" (Settings > Secrets
+          # and variables > Actions > tab Variables), KHÔNG phải "Secrets" — đây đều là giá trị
+          # PUBLIC theo thiết kế của Sanity/Clerk (project ID và publishable key không phải bí
+          # mật), không cần mã hoá như secret thật. Repo maintainer PHẢI tự thêm các biến này 1
+          # lần trong GitHub repo Settings trước khi workflow chạy đúng (xem docs/qa-log.md).
+          build-args: |
+            NEXT_PUBLIC_SANITY_PROJECT_ID=${{ vars.NEXT_PUBLIC_SANITY_PROJECT_ID }}
+            NEXT_PUBLIC_SANITY_DATASET=${{ vars.NEXT_PUBLIC_SANITY_DATASET }}
+            NEXT_PUBLIC_SANITY_API_VERSION=${{ vars.NEXT_PUBLIC_SANITY_API_VERSION }}
+            NEXT_PUBLIC_BASE_URL=${{ vars.NEXT_PUBLIC_BASE_URL }}
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Quét CVE CHỦ ĐỘNG trước khi push — ECR đã bật `repository_image_scan_on_push` (server-side,
+      # SAU khi push, xem infra/github-oidc-ecr.tf) nhưng đó là "biết sau khi đã lỡ push". Trivy ở
+      # đây chạy TRƯỚC push để có thể chặn hẳn image có lỗ hổng CRITICAL/HIGH chưa có bản vá,
+      # không để lọt lên registry (xem devops-handbook/09-security.md, 07-cicd.md).
+      - name: Scan image bằng Trivy (fail build nếu có CVE CRITICAL/HIGH chưa có bản vá)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.sha_short }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true # chỉ fail vì CVE ĐÃ CÓ bản vá — CVE chưa có fix thì fail cũng vô ích, chỉ chặn release
+          exit-code: "1"
+
+      - name: Push image lên ECR (tag immutable — mỗi lần push là 1 tag SHA mới, không đè tag cũ)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.sha_short }}
+          build-args: |
+            NEXT_PUBLIC_SANITY_PROJECT_ID=${{ vars.NEXT_PUBLIC_SANITY_PROJECT_ID }}
+            NEXT_PUBLIC_SANITY_DATASET=${{ vars.NEXT_PUBLIC_SANITY_DATASET }}
+            NEXT_PUBLIC_SANITY_API_VERSION=${{ vars.NEXT_PUBLIC_SANITY_API_VERSION }}
+            NEXT_PUBLIC_BASE_URL=${{ vars.NEXT_PUBLIC_BASE_URL }}
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          # Dùng lại cache từ bước build trước (GitHub Actions cache backend) — bước push này build
+          # lại với `push: true` nhưng cache-from đảm bảo không compile lại từ đầu, chỉ tốn thời
+          # gian export/push layer thật sự khác so với lần build load ở trên.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: In ra tag đã push (tiện tra cứu log)
+        run: |
+          echo "Đã push: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.sha_short }}"

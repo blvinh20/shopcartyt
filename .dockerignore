@@ -1,0 +1,47 @@
+# .dockerignore — loại bỏ file không cần thiết khỏi build context Docker.
+# Lý do quan trọng nhất: build context được gửi nguyên khối cho Docker daemon TRƯỚC khi build
+# bắt đầu — node_modules/.git/.next nặng hàng trăm MB-GB, gửi kèm vừa chậm vừa vô nghĩa vì
+# COPY trong Dockerfile không cần tới chúng (deps cài lại từ package-lock.json, .next build lại
+# từ source, .git không cần trong image chạy production).
+
+# dependencies — cài lại bên trong container qua package-lock.json, không copy từ host
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Next.js build output — build lại bên trong container, không copy artifact cũ từ host
+.next
+out
+build
+
+# git — không cần trong image, có thể chứa lịch sử nhạy cảm
+.git
+.gitignore
+
+# env — KHÔNG BAO GIỜ bake secret runtime vào image qua .env thật; build-time public var
+# truyền qua --build-arg trong workflow, không qua file .env copy vào context
+.env
+.env*.local
+.env.production
+.env.development
+
+# clerk local config (có thể chứa secret)
+.clerk
+
+# editor/OS
+.vscode
+.idea
+.DS_Store
+*.pem
+
+# docs/misc không cần cho build
+README.md
+seed.tar.gz
+
+# test/coverage
+coverage
+
+# typescript build info
+*.tsbuildinfo
