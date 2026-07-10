@@ -19,7 +19,7 @@ spec:
       containers:
         - name: shopcartyt
           # __IMAGE_TAG__ do CI tự thay bằng git SHA thật của lần push gần nhất (sed trong ci.yml).
-          image: 405163642902.dkr.ecr.ap-southeast-1.amazonaws.com/ecommerce-lab-shopcartyt:a454861
+          image: 405163642902.dkr.ecr.ap-southeast-1.amazonaws.com/ecommerce-lab-shopcartyt:555a9c0
           ports:
             - containerPort: 3000
           env:
