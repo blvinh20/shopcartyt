@@ -143,23 +143,17 @@ jobs:
           ignore-unfixed: true # chỉ fail vì CVE ĐÃ CÓ bản vá — CVE chưa có fix thì fail cũng vô ích, chỉ chặn release
           exit-code: "1"
 
-      - name: Push image lên ECR (tag immutable — mỗi lần push là 1 tag SHA mới, không đè tag cũ)
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.sha_short }}
-          build-args: |
-            NEXT_PUBLIC_SANITY_PROJECT_ID=${{ vars.NEXT_PUBLIC_SANITY_PROJECT_ID }}
-            NEXT_PUBLIC_SANITY_DATASET=${{ vars.NEXT_PUBLIC_SANITY_DATASET }}
-            NEXT_PUBLIC_SANITY_API_VERSION=${{ vars.NEXT_PUBLIC_SANITY_API_VERSION }}
-            NEXT_PUBLIC_BASE_URL=${{ vars.NEXT_PUBLIC_BASE_URL }}
-            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-          # Dùng lại cache từ bước build trước (GitHub Actions cache backend) — bước push này build
-          # lại với `push: true` nhưng cache-from đảm bảo không compile lại từ đầu, chỉ tốn thời
-          # gian export/push layer thật sự khác so với lần build load ở trên.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # QUAN TRỌNG: KHÔNG build lại lần 2 (`docker/build-push-action` với push:true) — bản trước
+      # làm vậy và Next.js build (webpack CSS minifier) cho ra kết quả KHÁC NHAU giữa 2 lần build
+      # liên tiếp cùng 1 Dockerfile/build-args/commit ("Unclosed block" CssSyntaxError chỉ xảy ra
+      # ở lần build thứ 2, lần đầu — bước Scan phía trên — build sạch), tức 2 lần build không
+      # deterministic (nghi ngờ do cache `type=gha` reuse giữa 2 lần build tách biệt gây corrupt
+      # 1 phần cache webpack). Fix đúng: chỉ build DUY NHẤT 1 LẦN (bước "Build image" phía trên,
+      # `load: true`), Trivy scan CHÍNH image đó, rồi ở đây chỉ `docker push` THẲNG image đã có sẵn
+      # trong Docker daemon cục bộ — đảm bảo image được scan và image được push là MỘT, không có
+      # rủi ro build lại ra nội dung khác.
+      - name: Push image lên ECR (push thẳng image đã build+scan ở trên, KHÔNG build lại)
+        run: docker push "${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.sha_short }}"
 
       - name: In ra tag đã push (tiện tra cứu log)
         run: |
