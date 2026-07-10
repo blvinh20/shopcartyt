@@ -1,0 +1,28 @@
+# metrics-server đã cài từ Phase 2 (eks-addons.tf, enable_metrics_server=true) — HPA đọc CPU usage
+# thật từ đó. Scale theo CPU vì Next.js SSR là workload CPU-bound (render/serialize response), khác
+# workload I/O-bound (memory-bound) không phù hợp autoscaleTargetCPU.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: shopcartyt
+  namespace: shopcartyt
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: shopcartyt
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      # Tránh flapping (scale down quá nhanh rồi phải scale up lại ngay khi traffic dao động) —
+      # chờ 2 phút ổn định trước khi thật sự giảm pod, khác hẳn Karpenter consolidateAfter (đó là
+      # xoá NODE rảnh, đây là xoá POD thừa — 2 cơ chế scale độc lập, tầng khác nhau).
+      stabilizationWindowSeconds: 120

@@ -1,0 +1,89 @@
+# Phase 7 — Deployment cho shopcartyt. Tag image do CI (ci.yml) tự cập nhật sau mỗi lần
+# build-scan-push thành công (commit riêng, path k8s/ bị paths-ignore để tránh vòng lặp trigger vô
+# hạn — xem comment trong ci.yml). KHÔNG tự tay sửa tag ở đây trừ khi rollback thủ công.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shopcartyt
+  namespace: shopcartyt
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: shopcartyt
+  template:
+    metadata:
+      labels:
+        app: shopcartyt
+    spec:
+      containers:
+        - name: shopcartyt
+          # __IMAGE_TAG__ do CI tự thay bằng git SHA thật của lần push gần nhất (sed trong ci.yml).
+          image: 405163642902.dkr.ecr.ap-southeast-1.amazonaws.com/ecommerce-lab-shopcartyt:a454861
+          ports:
+            - containerPort: 3000
+          env:
+            # --- Config public (không nhạy cảm) — đã bake sẵn vào bundle lúc `next build` qua
+            # build-arg (Dockerfile), khai lại ở đây CHỈ để phòng trường hợp code server-side (vd
+            # server action "use server" trong actions/createCheckoutSession.ts) đọc process.env
+            # lúc RUNTIME thay vì được webpack inline lúc build — an toàn dù có bị trùng/thừa.
+            - name: NEXT_PUBLIC_SANITY_PROJECT_ID
+              value: "clm2fm5c"
+            - name: NEXT_PUBLIC_SANITY_DATASET
+              value: "production"
+            - name: NEXT_PUBLIC_SANITY_API_VERSION
+              value: "2025-03-20"
+            - name: NEXT_PUBLIC_BASE_URL
+              value: "https://shopcartyt.alphatrue.net"
+            - name: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+              value: "pk_test_Y29tcGxldGUtcmF2ZW4tNjEuY2xlcmsuYWNjb3VudHMuZGV2JA"
+            # --- Secret thật — lấy từ K8s Secret do External Secrets đồng bộ từ AWS Secrets Manager
+            # (Phase 4, gitops-config/platform/external-secrets-config/externalsecret-shopcartyt-app.yaml).
+            # KHÔNG bao giờ hardcode giá trị thật ở đây.
+            - name: CLERK_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shopcartyt-app-secrets
+                  key: CLERK_SECRET_KEY
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shopcartyt-app-secrets
+                  key: STRIPE_SECRET_KEY
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: shopcartyt-app-secrets
+                  key: STRIPE_WEBHOOK_SECRET
+            - name: SANITY_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: shopcartyt-app-secrets
+                  key: SANITY_API_TOKEN
+            - name: SANITY_API_READ_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: shopcartyt-app-secrets
+                  key: SANITY_API_READ_TOKEN
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # Next.js standalone không có route /healthz riêng — dùng "/" làm health check (app trả
+          # 200 khi render trang chủ thành công, đủ để biết server Node.js còn sống + Sanity/Clerk
+          # không bị lỗi nghiêm trọng lúc render).
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 20

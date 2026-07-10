@@ -1,0 +1,32 @@
+# Dùng CHUNG 1 ALB với Grafana/ArgoCD (group.name: platform) — host-based routing qua domain
+# thật. KHÁC Grafana/ArgoCD: đây là storefront cho khách hàng thật, KHÔNG giới hạn
+# inbound-cidrs (không có admin-only IP restriction) — public 0.0.0.0/0 theo đúng bản chất
+# e-commerce app, không áp dụng rule "chỉ IP admin" như 2 tool nội bộ kia.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopcartyt
+  namespace: shopcartyt
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: platform
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-southeast-1:405163642902:certificate/30b89d33-7836-4179-a3f9-3690abb64a75
+    # Lưu ý: dấu phẩy chỉ cần escape ("\,") khi truyền qua Helm --set (xem qa-log.md Q50) — đây là
+    # YAML annotation thuần (kubectl apply trực tiếp), không qua Helm set-syntax, nên giữ nguyên.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443},{"HTTP":80}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+spec:
+  ingressClassName: alb
+  rules:
+    - host: shopcartyt.alphatrue.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shopcartyt
+                port:
+                  number: 80
