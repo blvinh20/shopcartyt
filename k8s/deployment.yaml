@@ -23,6 +23,10 @@ spec:
           ports:
             - containerPort: 3000
           env:
+            # H2 — OTel: @vercel/otel (instrumentation.ts) đọc endpoint này để export trace qua
+            # OTLP/HTTP tới Tempo (cổng 4318). Thiếu biến này thì tracing no-op (không crash).
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc.cluster.local:4318"
             # --- Config public (không nhạy cảm) — đã bake sẵn vào bundle lúc `next build` qua
             # build-arg (Dockerfile), khai lại ở đây CHỈ để phòng trường hợp code server-side (vd
             # server action "use server" trong actions/createCheckoutSession.ts) đọc process.env
