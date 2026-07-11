@@ -3,9 +3,16 @@ kind: Service
 metadata:
   name: shopcartyt
   namespace: shopcartyt
+  # Label metadata "app: shopcartyt" để ServiceMonitor (spec.selector.matchLabels app=shopcartyt)
+  # chọn được Service này — ServiceMonitor match label của SERVICE, không phải selector pod.
+  labels:
+    app: shopcartyt
 spec:
   selector:
     app: shopcartyt
   ports:
-    - port: 80
+    # Đặt TÊN port "http" — ServiceMonitor endpoint tham chiếu port theo tên ("port: http"), không
+    # theo số. Không đặt tên thì Prometheus không map được endpoint để scrape.
+    - name: http
+      port: 80
       targetPort: 3000
