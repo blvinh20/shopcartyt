@@ -69,6 +69,29 @@ spec:
                 secretKeyRef:
                   name: shopcartyt-app-secrets
                   key: SANITY_API_READ_TOKEN
+            # --- Dify integration (A3 RAG) ---
+            # DIFY_API_URL: route /api/sync-dify chạy server-side TRONG cluster -> Service nội bộ
+            # (proxy "dify" port 80, verify bằng `kubectl get svc -n ai`). KHÔNG nhạy cảm -> value thẳng.
+            - name: DIFY_API_URL
+              value: "http://dify.ai.svc.cluster.local/v1"
+            # DIFY_WIDGET_BASE_URL: browser tải embed.min.js -> phải public origin (khác URL nội bộ trên).
+            - name: DIFY_WIDGET_BASE_URL
+              value: "https://dify.alphatrue.net"
+            # DIFY_APP_TOKEN: token nhúng chatbot (KHÔNG bí mật — nằm công khai trong HTML). Điền token
+            # thật lấy từ Dify UI (App -> Publish -> Embed on website). Để trống -> widget tự ẩn.
+            - name: DIFY_APP_TOKEN
+              value: "NAtfNwCyPTxAkJSh"
+            # DIFY_API_KEY: BÍ MẬT (ghi được Knowledge Base) -> qua Secret như Clerk/Stripe/Sanity.
+            # Thêm key "DIFY_API_KEY" vào JSON secret AWS "ecommerce-lab-dev-shopcartyt-app-secrets" ->
+            # External Secrets (dataFrom.extract) tự đưa vào K8s Secret shopcartyt-app-secrets ở lần
+            # refresh kế tiếp, KHÔNG cần sửa ExternalSecret. optional=true để pod không kẹt
+            # CreateContainerConfigError trong lúc key chưa được thêm vào secret.
+            - name: DIFY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shopcartyt-app-secrets
+                  key: DIFY_API_KEY
+                  optional: true
           resources:
             requests:
               cpu: 100m
